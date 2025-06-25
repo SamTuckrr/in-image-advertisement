@@ -1,19 +1,17 @@
-
 import streamlit as st
-import os
-import json
 
 st.set_page_config(page_title="Back Office - Overview", layout="wide")
-st.title("📂 Back Office - Scan Overview")
 
-scan_dir = "."
-json_files = [f for f in os.listdir(scan_dir) if f.endswith(".json")]
+st.title("📊 Back Office Dashboard")
 
-if not json_files:
-    st.info("No scans found yet. Upload images from the main app.")
-else:
-    for file in json_files:
-        st.subheader(file)
-        with open(os.path.join(scan_dir, file), "r") as f:
-            data = json.load(f)
-        st.json(data)
+st.markdown("""
+Welcome to the admin dashboard.
+
+### Features we’ll showcase here:
+- Upload history
+- Brand logo scan results
+- AI content detection logs
+- Metadata reports
+
+🚀 This will become your command centre as your app evolves!
+""")
