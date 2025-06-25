@@ -1,105 +1,95 @@
 import streamlit as st
 import os
 import json
-import uuid
 import tempfile
-import piexif
-from PIL import Image
 from google.cloud import vision
+from PIL import Image
+import piexif
+
+# --- Set Streamlit Page Config ---
+st.set_page_config(page_title="InImageAd - Logo Detection Platform", layout="centered")
 
 # --- Secure Credential Handling ---
 with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-    json.dump(st.secrets["gcp_service_account"], tmp)
+    json.dump(dict(st.secrets["gcp_service_account"]), tmp)
     tmp.flush()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp.name
 
-# --- Load Brand Links Map (Optional) ---
-BRAND_LINKS = {}
+# --- Load Brand Links (optional, from JSON) ---
+brand_links = {}
 try:
-    with open("brand_links_500.json", "r", encoding="utf-8") as f:
-        BRAND_LINKS = json.load(f)
-except:
-    st.warning("Could not load brand_links_500.json. No brand hyperlinks will be shown.")
+    with open("brand_links_500.json", "r") as f:
+        brand_links = json.load(f)
+except Exception:
+    st.warning("⚠️ Could not load brand_links_500.json. No brand hyperlinks will be shown.")
 
-# --- Streamlit UI ---
-st.set_page_config(page_title="InImageAd - Logo Detection Platform", layout="centered")
-st.title("InImageAd - Logo Detection Platform")
-st.markdown("Upload image(s) below to detect brand logos and generate metadata.")
-
-uploaded_files = st.file_uploader(
-    "Upload image(s)", type=["jpg", "jpeg", "png"], accept_multiple_files=True
-)
-
-# --- Initialize Vision API ---
+# --- Vision API Client ---
 try:
     client = vision.ImageAnnotatorClient()
 except Exception:
     st.error("❌ Failed to initialize Google Vision Client.")
     st.stop()
 
-# --- Process Uploads ---
+# --- UI Instructions ---
+st.title("InImageAd - Logo Detection Platform")
+st.markdown("Upload your images to detect logos and extract metadata.")
+
+uploaded_files = st.file_uploader("Upload image(s)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+
+# --- Main Processing ---
 if uploaded_files:
     for idx, uploaded_file in enumerate(uploaded_files, 1):
         st.markdown(f"### 📷 Image {idx}")
-        st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+        st.image(uploaded_file, use_column_width=True)
+
         image_bytes = uploaded_file.read()
         image = vision.Image(content=image_bytes)
 
-        # --- Detect Logos ---
+        # Logo Detection
         try:
             response = client.logo_detection(image=image)
             logos = response.logo_annotations
-        except Exception as ex:
-            st.error(f"Logo detection failed: {ex}")
+        except Exception as e:
+            st.error(f"❌ Error during logo detection: {e}")
             continue
 
-        st.subheader("Detected Logos:")
-        metadata = {"detected_logos": []}
-
+        st.markdown("#### 🏷️ Detected Logos:")
         if logos:
             for logo in logos:
-                brand = logo.description
+                name = logo.description
                 score = round(logo.score * 100, 2)
-                link = BRAND_LINKS.get(brand)
-                metadata["detected_logos"].append({
-                    "brand": brand,
-                    "confidence": score,
-                    "link": link
-                })
+                link = brand_links.get(name)
 
-                st.markdown(f"**{brand}** — {score}% confidence")
+                st.write(f"**{name}** — {score}% confidence")
                 if link:
-                    st.markdown(f"[🔗 Visit Brand Site]({link})")
-                else:
-                    st.write("No link mapped")
-                st.markdown("---")
+                    st.markdown(f"[Visit Brand Site]({link})")
+                st.write("---")
         else:
             st.info("No logos detected.")
 
-        # --- Extract EXIF Metadata ---
-        exif_data = {}
+        # EXIF Metadata Extraction
+        st.markdown("#### 📂 Metadata Info:")
         try:
             img = Image.open(uploaded_file)
-            exif_bytes = img.info.get("exif")
-            if exif_bytes:
-                raw_exif = piexif.load(exif_bytes)
-                for ifd in raw_exif:
-                    if isinstance(raw_exif[ifd], dict):
-                        for tag in raw_exif[ifd]:
-                            key = piexif.TAGS[ifd].get(tag, {}).get("name", tag)
-                            val = raw_exif[ifd][tag]
-                            if isinstance(val, bytes):
-                                val = val.decode(errors="ignore")
-                            exif_data[f"{ifd}.{key}"] = val
-            metadata["exif"] = exif_data
-        except Exception as e:
-            metadata["exif_error"] = str(e)
+            exif_data = piexif.load(img.info.get("exif", b""))
+            user_metadata = {
+                "FileName": uploaded_file.name,
+                "DetectedLogos": [logo.description for logo in logos],
+                "ConfidenceScores": [round(logo.score * 100, 2) for logo in logos],
+                "EXIF": {
+                    "Make": exif_data["0th"].get(piexif.ImageIFD.Make, b"").decode("utf-8", "ignore"),
+                    "Model": exif_data["0th"].get(piexif.ImageIFD.Model, b"").decode("utf-8", "ignore"),
+                }
+            }
 
-        # --- Save Metadata JSON ---
-        output_filename = f"{uuid.uuid4()}.jpeg.json"
-        with open(output_filename, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
-        st.success(f"✅ Metadata saved to `{output_filename}`")
+            json_filename = uploaded_file.name + ".json"
+            with open(json_filename, "w") as jf:
+                json.dump(user_metadata, jf, indent=2)
+            st.success(f"Metadata saved to **{json_filename}**")
+        except Exception:
+            st.warning("⚠️ Could not read or save EXIF metadata.")
 
-st.caption("Powered by Google Cloud Vision & Streamlit | © 2025 InImageAd")
+# --- Footer ---
+st.caption("Powered by Google Cloud Vision & Streamlit • © 2025 InImageAd")
+
 
