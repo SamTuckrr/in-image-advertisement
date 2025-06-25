@@ -33,8 +33,9 @@ st.set_page_config(page_title="InImageAd", layout="centered")
 st.title("InImageAd - Logo Detection Prototype")
 st.write("Upload an image. We’ll detect logos and link you to the brand site if available.")
 
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
-
+uploaded_files = st.file_uploader(
+    "Upload image(s)", type=["jpg", "jpeg", "png"], accept_multiple_files=True
+)
 if uploaded_file:
     st.image(uploaded_file, use_column_width=True)
     image_bytes = uploaded_file.read()
