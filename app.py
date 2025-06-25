@@ -36,8 +36,8 @@ st.write("Upload an image. We’ll detect logos and link you to the brand site i
 uploaded_files = st.file_uploader(
     "Upload image(s)", type=["jpg", "jpeg", "png"], accept_multiple_files=True
 )
-if uploaded_file:
-    st.image(uploaded_file, use_column_width=True)
+if uploaded_files:
+    st.image(uploaded_files, use_column_width=True)
     image_bytes = uploaded_file.read()
 
     # --- Logo Detection ---
