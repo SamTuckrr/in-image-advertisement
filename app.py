@@ -1,95 +1,96 @@
 import streamlit as st
 import os
-import json
 import tempfile
-from google.cloud import vision
-from PIL import Image
+import json
 import piexif
+from PIL import Image
+from google.cloud import vision
+from google.oauth2 import service_account
 
-# --- Set Streamlit Page Config ---
-st.set_page_config(page_title="InImageAd - Logo Detection Platform", layout="centered")
+# Secure Google Vision credentials
+creds = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"]
+)
+client = vision.ImageAnnotatorClient(credentials=creds)
 
-# --- Secure Credential Handling ---
-with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-    json.dump(dict(st.secrets["gcp_service_account"]), tmp)
-    tmp.flush()
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp.name
+# Brand hyperlinks (top 100+ global brands & cars)
+BRAND_LINKS = {
+    "Nike": "https://www.nike.com", "Adidas": "https://www.adidas.com", "Apple": "https://www.apple.com",
+    "Samsung": "https://www.samsung.com", "Microsoft": "https://www.microsoft.com", "Amazon": "https://www.amazon.com",
+    "Google": "https://www.google.com", "Facebook": "https://www.facebook.com", "Coca-Cola": "https://www.coca-cola.com",
+    "Pepsi": "https://www.pepsi.com", "McDonald's": "https://www.mcdonalds.com", "Starbucks": "https://www.starbucks.com",
+    "Toyota": "https://www.toyota.com", "BMW": "https://www.bmw.com", "Mercedes-Benz": "https://www.mercedes-benz.com",
+    "Audi": "https://www.audi.com", "Volkswagen": "https://www.vw.com", "Ford": "https://www.ford.com",
+    "Honda": "https://www.honda.com", "Hyundai": "https://www.hyundai.com", "Nissan": "https://www.nissan-global.com",
+    "Chevrolet": "https://www.chevrolet.com", "Kia": "https://www.kia.com", "Lexus": "https://www.lexus.com",
+    "Jeep": "https://www.jeep.com", "Land Rover": "https://www.landrover.com", "Porsche": "https://www.porsche.com",
+    "Jaguar": "https://www.jaguar.com", "Mazda": "https://www.mazda.com", "Ferrari": "https://www.ferrari.com",
+    "Lamborghini": "https://www.lamborghini.com", "Bugatti": "https://www.bugatti.com", "Rolls-Royce": "https://www.rolls-roycemotorcars.com",
+    "Bentley": "https://www.bentleymotors.com", "Tesla": "https://www.tesla.com", "Shell": "https://www.shell.com",
+    "BP": "https://www.bp.com", "Visa": "https://www.visa.com", "MasterCard": "https://www.mastercard.com",
+    "Sony": "https://www.sony.com", "Panasonic": "https://www.panasonic.com", "LG": "https://www.lg.com",
+    "Nestlé": "https://www.nestle.com", "Unilever": "https://www.unilever.com", "Procter & Gamble": "https://us.pg.com",
+    "Heineken": "https://www.theheinekencompany.com", "Red Bull": "https://www.redbull.com", "Budweiser": "https://www.budweiser.com",
+    "Netflix": "https://www.netflix.com", "Disney": "https://www.disney.com", "YouTube": "https://www.youtube.com",
+    "Twitter": "https://www.twitter.com", "Instagram": "https://www.instagram.com", "LinkedIn": "https://www.linkedin.com",
+    "HP": "https://www.hp.com", "Dell": "https://www.dell.com", "Lenovo": "https://www.lenovo.com",
+    "Intel": "https://www.intel.com", "AMD": "https://www.amd.com", "NVIDIA": "https://www.nvidia.com",
+    "Maxell": "https://www.maxell.eu.com", "Bank of America": "https://www.bankofamerica.com"
+}
 
-# --- Load Brand Links (optional, from JSON) ---
-brand_links = {}
-try:
-    with open("brand_links_500.json", "r") as f:
-        brand_links = json.load(f)
-except Exception:
-    st.warning("⚠️ Could not load brand_links_500.json. No brand hyperlinks will be shown.")
-
-# --- Vision API Client ---
-try:
-    client = vision.ImageAnnotatorClient()
-except Exception:
-    st.error("❌ Failed to initialize Google Vision Client.")
-    st.stop()
-
-# --- UI Instructions ---
+# Streamlit UI
+st.set_page_config(page_title="InImageAd - Logo Detection", layout="centered")
 st.title("InImageAd - Logo Detection Platform")
-st.markdown("Upload your images to detect logos and extract metadata.")
-
 uploaded_files = st.file_uploader("Upload image(s)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
-# --- Main Processing ---
+# Main processing loop
 if uploaded_files:
-    for idx, uploaded_file in enumerate(uploaded_files, 1):
-        st.markdown(f"### 📷 Image {idx}")
-        st.image(uploaded_file, use_column_width=True)
-
+    for uploaded_file in uploaded_files:
+        st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
         image_bytes = uploaded_file.read()
-        image = vision.Image(content=image_bytes)
+        vision_image = vision.Image(content=image_bytes)
 
-        # Logo Detection
+        # Logo detection
         try:
-            response = client.logo_detection(image=image)
+            response = client.logo_detection(image=vision_image)
             logos = response.logo_annotations
         except Exception as e:
-            st.error(f"❌ Error during logo detection: {e}")
+            st.error(f"Logo detection failed: {e}")
             continue
 
-        st.markdown("#### 🏷️ Detected Logos:")
+        st.markdown("### Detected Logos")
         if logos:
             for logo in logos:
-                name = logo.description
+                brand = logo.description
                 score = round(logo.score * 100, 2)
-                link = brand_links.get(name)
-
-                st.write(f"**{name}** — {score}% confidence")
-                if link:
-                    st.markdown(f"[Visit Brand Site]({link})")
+                st.write(f"**{brand}** — {score}% confidence")
+                st.markdown(f"[Visit Brand Site]({BRAND_LINKS.get(brand, '#')})" if brand in BRAND_LINKS else "No link mapped")
                 st.write("---")
         else:
             st.info("No logos detected.")
 
-        # EXIF Metadata Extraction
-        st.markdown("#### 📂 Metadata Info:")
+        # EXIF metadata extraction
         try:
-            img = Image.open(uploaded_file)
-            exif_data = piexif.load(img.info.get("exif", b""))
-            user_metadata = {
-                "FileName": uploaded_file.name,
-                "DetectedLogos": [logo.description for logo in logos],
-                "ConfidenceScores": [round(logo.score * 100, 2) for logo in logos],
-                "EXIF": {
-                    "Make": exif_data["0th"].get(piexif.ImageIFD.Make, b"").decode("utf-8", "ignore"),
-                    "Model": exif_data["0th"].get(piexif.ImageIFD.Model, b"").decode("utf-8", "ignore"),
-                }
-            }
-
-            json_filename = uploaded_file.name + ".json"
-            with open(json_filename, "w") as jf:
-                json.dump(user_metadata, jf, indent=2)
-            st.success(f"Metadata saved to **{json_filename}**")
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(image_bytes)
+                tmp_path = tmp.name
+            exif_dict = piexif.load(tmp_path)
+            metadata = {str(tag): str(value) for tag, value in exif_dict.get("Exif", {}).items()}
         except Exception:
-            st.warning("⚠️ Could not read or save EXIF metadata.")
+            metadata = {"warning": "No EXIF metadata available."}
 
-# --- Footer ---
-st.caption("Powered by Google Cloud Vision & Streamlit • © 2025 InImageAd")
+        st.markdown("### Image Metadata")
+        st.json(metadata)
 
+        # Optional: Save metadata JSON
+        filename = uploaded_file.name + ".json"
+        with open(filename, "w") as f:
+            json.dump({
+                "filename": uploaded_file.name,
+                "logos": [l.description for l in logos],
+                "confidence": [round(l.score * 100, 2) for l in logos],
+                "metadata": metadata
+            }, f)
+            st.success(f"Metadata saved to {filename}")
 
+st.caption("Powered by Google Cloud Vision & Streamlit | © 2025 InImageAd")
