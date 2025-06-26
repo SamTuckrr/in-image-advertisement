@@ -1,100 +1,75 @@
 import streamlit as st
+from google.cloud import vision
+from google.oauth2 import service_account
+from PIL import Image
+import io
 import os
 import json
 import piexif
-from PIL import Image
-from google.cloud import vision
-from google.oauth2 import service_account
-from datetime import datetime
 
-# --- Page config ---
+# Page configuration
 st.set_page_config(page_title="InImageAd - Logo Detection", layout="wide")
+st.title("🖼️ InImageAd - Logo Detection Platform")
+st.markdown("Upload one or more images. The system will scan for logos and metadata.")
 
-st.title("🧠 InImageAd - Logo Detection Platform")
-st.caption("Upload one or more images. The system will scan for logos and extract metadata.")
+# GCP credentials
+creds = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"]
+)
+client = vision.ImageAnnotatorClient(credentials=creds)
 
-# --- Load brand link map ---
-brand_links = {}
-if os.path.exists("brand_links_500.json"):
-    with open("brand_links_500.json", "r", encoding="utf-8") as f:
-        brand_links = json.load(f)
-else:
-    st.warning("Brand link file not found. Brand hyperlinks will not be shown.")
-
-# --- Setup Google Vision Client ---
-try:
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"]
-    )
-    client = vision.ImageAnnotatorClient(credentials=creds)
-except Exception as e:
-    st.error("❌ Failed to initialize Google Vision Client.")
-    st.stop()
-
-# --- Upload files ---
-uploaded_files = st.file_uploader("Upload image(s)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+# File uploader
+uploaded_files = st.file_uploader("Upload image(s)", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
 
 if uploaded_files:
-    st.success(f"{len(uploaded_files)} image(s) uploaded. Processing...")
-
     for uploaded_file in uploaded_files:
-        st.divider()
-        st.image(uploaded_file, caption=uploaded_file.name, width=300)
+        st.image(uploaded_file, caption=uploaded_file.name, use_column_width=True)
 
-        # Read bytes
+        # Read image bytes
         image_bytes = uploaded_file.read()
 
-        # --- Logo Detection ---
+        # Wrap bytes in Google Vision API Image object
+        vision_image = vision.Image(content=image_bytes)
+
         try:
-            response = client.logo_detection(image=image_bytes)
+            # Logo detection
+            response = client.logo_detection(image=vision_image)
             logos = response.logo_annotations
+
+            if logos:
+                st.subheader("🧠 Detected Logos:")
+                for logo in logos:
+                    st.markdown(f"- **{logo.description}** (Confidence: {round(logo.score * 100, 2)}%)")
+            else:
+                st.info("No logos detected.")
+
+            # Metadata extraction using piexif
+            st.subheader("📸 Metadata:")
+            try:
+                img = Image.open(io.BytesIO(image_bytes))
+                exif_data = piexif.load(img.info.get('exif', b''))
+                if exif_data:
+                    for ifd in exif_data:
+                        if isinstance(exif_data[ifd], dict):
+                            for tag in exif_data[ifd]:
+                                label = piexif.TAGS[ifd].get(tag, {'name': 'Unknown'})['name']
+                                value = exif_data[ifd][tag]
+                                st.markdown(f"**{label}**: {value}")
+                else:
+                    st.info("No EXIF metadata found.")
+            except Exception as e:
+                st.warning(f"Metadata read error: {e}")
+
+            # Save results to JSON
+            result = {
+                "filename": uploaded_file.name,
+                "detected_logos": [logo.description for logo in logos],
+                "metadata": "See metadata section above"
+            }
+
+            json_filename = f"{os.path.splitext(uploaded_file.name)[0]}_results.json"
+            with open(json_filename, "w") as f:
+                json.dump(result, f, indent=2)
+
         except Exception as e:
             st.error(f"Vision API error: {e}")
-            continue
-
-        st.subheader("🧷 Detected Logos")
-        results = []
-        if logos:
-            for logo in logos:
-                name = logo.description
-                score = round(logo.score * 100, 2)
-                link = brand_links.get(name.lower(), None)
-
-                if link:
-                    st.markdown(f"**{name}** ({score}%) – [Visit site]({link})")
-                else:
-                    st.write(f"**{name}** ({score}%)")
-
-                results.append({"name": name, "confidence": score, "link": link})
-        else:
-            st.write("No logos found.")
-
-        # --- Metadata Extraction ---
-        st.subheader("🗂 Image Metadata")
-        try:
-            with Image.open(uploaded_file) as img:
-                exif_data = piexif.load(img.info.get("exif", b""))
-                formatted = {tag: str(value) for tag_dict in exif_data.values() for tag, value in tag_dict.items()}
-                if formatted:
-                    st.json(formatted)
-                else:
-                    st.write("No metadata found.")
-        except Exception as e:
-            st.write("No metadata or EXIF extraction failed.")
-
-        # --- Save results as JSON file ---
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = uploaded_file.name.replace(" ", "_").replace(".", "_")
-        result_file = f"scan_{safe_name}_{timestamp}.json"
-
-        scan_result = {
-            "filename": uploaded_file.name,
-            "detected_logos": results,
-            "metadata": formatted if 'formatted' in locals() else {},
-            "timestamp": timestamp
-        }
-
-        with open(result_file, "w", encoding="utf-8") as out:
-            json.dump(scan_result, out, indent=2)
-
-        st.success(f"Scan results saved to: {result_file}")
